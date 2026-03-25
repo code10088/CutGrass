@@ -1,0 +1,79 @@
+#pragma kernel CSMain
+
+Texture2D<float4> _SpawnMask;
+StructuredBuffer<uint> _CutStates;
+SamplerState sampler_SpawnMask;
+AppendStructuredBuffer<float4> _GrassPositions;
+
+float2 _SpawnMinXZ;
+float2 _SpawnMaxXZ;
+float _GridSize;
+float _Threshold;
+float _GrassHeight;
+float4x4 _ViewProj;
+int _GridCountX;
+int _GridCountZ;
+int _UseSpawnMask;
+
+float Hash12(float2 p)
+{
+    float h = dot(p, float2(127.1, 311.7));
+    return frac(sin(h) * 43758.5453123);
+}
+
+bool IsOutsideFrustum(float3 positionWS)
+{
+    positionWS.y += _GrassHeight;
+
+    float4 positionCS = mul(_ViewProj, float4(positionWS, 1.0));
+    if (positionCS.w <= 0.0)
+    {
+        return true;
+    }
+
+    float3 positionNDC = positionCS.xyz / positionCS.w;
+    const float tolerance = 0.5;
+
+    bool isInsideFrustum =
+        positionNDC.x >= (-1.0 - tolerance) && positionNDC.x <= (1.0 + tolerance) &&
+        positionNDC.y >= (-1.0 - tolerance) && positionNDC.y <= (1.0 + tolerance) &&
+        positionNDC.z >= -1.0 && positionNDC.z <= 1.1;
+
+    return !isInsideFrustum;
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _GridCountX || id.y >= _GridCountZ)
+    {
+        return;
+    }
+
+    float2 cellXZ = _SpawnMinXZ + float2(id.x, id.y) * _GridSize;
+    float3 positionWS = float3(cellXZ.x, 0.0, cellXZ.y);
+    if (IsOutsideFrustum(positionWS))
+    {
+        return;
+    }
+
+    uint cutValue = _CutStates[id.y * _GridCountX + id.x];
+    if (cutValue == 0)
+    {
+        return;
+    }
+
+    if (_UseSpawnMask != 0)
+    {
+        float2 range = max(_SpawnMaxXZ - _SpawnMinXZ, float2(0.0001, 0.0001));
+        float2 uv = saturate((cellXZ - _SpawnMinXZ) / range);
+        float texValue = _SpawnMask.SampleLevel(sampler_SpawnMask, uv, 0).r;
+        if (texValue <= _Threshold)
+        {
+            return;
+        }
+    }
+
+    float rotation = Hash12(float2(id.x, id.y)) * 360.0;
+    _GrassPositions.Append(float4(positionWS.x, positionWS.y, positionWS.z, rotation));
+}

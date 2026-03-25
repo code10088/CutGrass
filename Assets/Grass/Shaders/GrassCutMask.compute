@@ -1,0 +1,41 @@
+#pragma kernel CSMain
+
+RWStructuredBuffer<uint> _CutStates;
+
+float2 _SpawnMinXZ;
+float _GridSize;
+float3 _CutStart;
+float3 _CutEnd;
+float _CutRadius;
+int _GridCountX;
+int _GridCountZ;
+
+float DistanceToSegmentXZ(float2 p, float2 start, float2 end)
+{
+    float2 segment = end - start;
+    float lengthSq = dot(segment, segment);
+    if (lengthSq <= 0.000001)
+    {
+        return distance(p, start);
+    }
+
+    float t = saturate(dot(p - start, segment) / lengthSq);
+    float2 closest = lerp(start, end, t);
+    return distance(p, closest);
+}
+
+[numthreads(8, 8, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _GridCountX || id.y >= _GridCountZ)
+    {
+        return;
+    }
+
+    float2 worldXZ = _SpawnMinXZ + float2(id.x, id.y) * _GridSize;
+    float dist = DistanceToSegmentXZ(worldXZ, _CutStart.xz, _CutEnd.xz);
+    if (dist <= _CutRadius)
+    {
+        _CutStates[id.y * _GridCountX + id.x] = 0;
+    }
+}
